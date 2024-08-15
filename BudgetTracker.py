@@ -1,8 +1,10 @@
 import os
 import csv
 from datetime import datetime
-import matplotlib.pyplot as plt
 from collections import defaultdict
+import matplotlib.pyplot as plt
+from cryptography.fernet import Fernet
+import getpass
 
 class BudgetTracker:
     def __init__(self):
@@ -13,12 +15,30 @@ class BudgetTracker:
         self.current_profile = 'default'
         self.recurring_transactions = defaultdict(list)
         self.budgets = defaultdict(float)
+        self.key = self.load_key()
+        self.cipher_suite = Fernet(self.key)
+
+    def load_key(self):
+        try:
+            with open("secret.key", "rb") as key_file:
+                return key_file.read()
+        except FileNotFoundError:
+            key = Fernet.generate_key()
+            with open("secret.key", "wb") as key_file:
+                key_file.write(key)
+            return key
+
+    def encrypt_data(self, data):
+        return self.cipher_suite.encrypt(data.encode())
+
+    def decrypt_data(self, encrypted_data):
+        return self.cipher_suite.decrypt(encrypted_data).decode()
 
     def add_income(self, description, amount, category='General'):
         transaction = {
             'id': self.next_id,
             'type': 'Income',
-            'description': description,
+            'description': self.encrypt_data(description),
             'amount': amount,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'category': category,
@@ -34,7 +54,7 @@ class BudgetTracker:
         transaction = {
             'id': self.next_id,
             'type': 'Expense',
-            'description': description,
+            'description': self.encrypt_data(description),
             'amount': amount,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'category': category,
@@ -45,16 +65,6 @@ class BudgetTracker:
         self.categories[category] -= amount
         self.update_budget(category, -amount)
         self.check_budget(category)
-
-    def update_budget(self, category, amount):
-        if category in self.budgets:
-            self.budgets[category] += amount
-        else:
-            self.budgets[category] = amount
-
-    def check_budget(self, category):
-        if category in self.budgets and self.budgets[category] < -500:
-            print(f"\033[93mWarning:\033[0m You have exceeded the budget for {category}!")
 
     def calculate_balance(self):
         income = sum(t['amount'] for t in self.transactions if t['type'] == 'Income' and t['profile'] == self.current_profile)
@@ -67,9 +77,10 @@ class BudgetTracker:
         print("="*85)
         for t in self.transactions:
             if t['profile'] == self.current_profile:
+                desc = self.decrypt_data(t['description'])
                 color = '\033[92m' if t['type'] == 'Income' else '\033[91m'
                 reset = '\033[0m'
-                print(f"{t['id']:<5} {color}{t['type']:<10}{reset} {t['description']:<20} {t['amount']:<10} {t['category']:<15} {t['timestamp']:<20}")
+                print(f"{t['id']:<5} {color}{t['type']:<10}{reset} {desc:<20} {t['amount']:<10} {t['category']:<15} {t['timestamp']:<20}")
         self.display_summary()
 
     def display_summary(self):
@@ -113,7 +124,7 @@ class BudgetTracker:
     def add_recurring_transaction(self, transaction_type, description, amount, category='General', interval='monthly'):
         self.recurring_transactions[self.current_profile].append({
             'type': transaction_type,
-            'description': description,
+            'description': self.encrypt_data(description),
             'amount': amount,
             'category': category,
             'interval': interval
@@ -122,7 +133,7 @@ class BudgetTracker:
     def process_recurring_transactions(self):
         for transaction in self.recurring_transactions[self.current_profile]:
             if transaction['interval'] == 'monthly':
-                self.add_income(transaction['description'], transaction['amount'], transaction['category']) if transaction['type'] == 'Income' else self.add_expense(transaction['description'], transaction['amount'], transaction['category'])
+                self.add_income(self.decrypt_data(transaction['description']), transaction['amount'], transaction['category']) if transaction['type'] == 'Income' else self.add_expense(self.decrypt_data(transaction['description']), transaction['amount'], transaction['category'])
 
     def generate_graphical_report(self):
         income = defaultdict(float)
@@ -158,6 +169,7 @@ class BudgetTracker:
 
             writer.writeheader()
             for transaction in self.transactions:
+                transaction['description'] = self.decrypt_data(transaction['description'])
                 writer.writerow(transaction)
         print(f"Data saved to {filename}")
 
@@ -169,6 +181,7 @@ class BudgetTracker:
                 self.categories = defaultdict(float)
                 for row in reader:
                     row['amount'] = float(row['amount'])
+                    row['description'] = self.encrypt_data(self.decrypt_data(row['description']))
                     self.transactions.append(row)
                     self.categories[row['category']] += row['amount']
                     self.next_id = max(self.next_id, int(row['id']) + 1)
@@ -178,6 +191,15 @@ class BudgetTracker:
 
     def clear_screen(self):
         os.system('cls' if os.name == 'nt' else 'clear')
+
+    def authenticate_user(self):
+        profile_name = input("Enter profile name: ")
+        password = getpass.getpass("Enter password: ")
+        # In a real application, use hashed passwords and secure authentication
+        if profile_name in self.profiles and self.profiles[profile_name].get('password') == password:
+            self.switch_profile(profile_name)
+        else:
+            print("Invalid profile name or password.")
 
 if __name__ == "__main__":
     tracker = BudgetTracker()
@@ -195,35 +217,39 @@ if __name__ == "__main__":
         print("7. Edit a Transaction")
         print("8. Delete a Transaction")
         print("9. Search Transactions")
-        print("10. Export Transactions to CSV")
+        print("10. Export Transactions")
         print("11. View Category Summary")
         print("12. Add Profile")
         print("13. Switch Profile")
         print("14. Add Recurring Transaction")
         print("15. Generate Graphical Report")
-        print("16. Save & Exit")
-        print("0. Exit without Saving")
+        print("16. Save Data")
+        print("17. Authenticate User")
+        print("0. Exit")
 
         choice = input("Select an option: ")
 
         if choice == '1':
-            desc = input("Enter income description: ")
-            amt = tracker.input_amount("Enter amount: ")
+            desc = input("Enter description: ")
+            amt = float(input("Enter amount: "))
             category = input("Enter category: ")
             tracker.add_income(desc, amt, category)
         elif choice == '2':
-            desc = input("Enter expense description: ")
-            amt = tracker.input_amount("Enter amount: ")
+            desc = input("Enter description: ")
+            amt = float(input("Enter amount: "))
             category = input("Enter category: ")
             tracker.add_expense(desc, amt, category)
         elif choice == '3':
             tracker.clear_screen()
             tracker.display_summary()
         elif choice == '4':
+            tracker.clear_screen()
             tracker.display_transactions()
         elif choice == '5':
+            tracker.clear_screen()
             tracker.display_filtered_transactions('Income')
         elif choice == '6':
+            tracker.clear_screen()
             tracker.display_filtered_transactions('Expense')
         elif choice == '7':
             id_to_edit = int(input("Enter transaction ID to edit: "))
@@ -238,6 +264,7 @@ if __name__ == "__main__":
             filename = input("Enter filename (default: transactions.csv): ")
             tracker.export_transactions(filename)
         elif choice == '11':
+            tracker.clear_screen()
             tracker.display_category_summary()
         elif choice == '12':
             profile_name = input("Enter new profile name: ")
@@ -248,15 +275,17 @@ if __name__ == "__main__":
         elif choice == '14':
             transaction_type = input("Enter transaction type (Income/Expense): ")
             desc = input("Enter description: ")
-            amt = tracker.input_amount("Enter amount: ")
+            amt = float(input("Enter amount: "))
             category = input("Enter category: ")
             interval = input("Enter interval (monthly/weekly): ")
             tracker.add_recurring_transaction(transaction_type, desc, amt, category, interval)
         elif choice == '15':
             tracker.generate_graphical_report()
         elif choice == '16':
-            tracker.save_data()
-            break
+            filename = input("Enter filename (default: budget_data.csv): ")
+            tracker.save_data(filename)
+        elif choice == '17':
+            tracker.authenticate_user()
         elif choice == '0':
             break
         else:
