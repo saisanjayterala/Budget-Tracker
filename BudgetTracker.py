@@ -1,51 +1,75 @@
 import os
 import csv
 from datetime import datetime
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
 class BudgetTracker:
     def __init__(self):
         self.transactions = []
         self.next_id = 1
-        self.categories = {}
+        self.categories = defaultdict(float)
+        self.profiles = {}
+        self.current_profile = 'default'
+        self.recurring_transactions = defaultdict(list)
+        self.budgets = defaultdict(float)
 
     def add_income(self, description, amount, category='General'):
-        self.transactions.append({
+        transaction = {
             'id': self.next_id,
             'type': 'Income',
             'description': description,
             'amount': amount,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'category': category
-        })
+            'category': category,
+            'profile': self.current_profile
+        }
+        self.transactions.append(transaction)
         self.next_id += 1
-        self.update_category(category, amount)
+        self.categories[category] += amount
+        self.update_budget(category, amount)
+        self.check_budget(category)
 
     def add_expense(self, description, amount, category='General'):
-        self.transactions.append({
+        transaction = {
             'id': self.next_id,
             'type': 'Expense',
             'description': description,
             'amount': amount,
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'category': category
-        })
+            'category': category,
+            'profile': self.current_profile
+        }
+        self.transactions.append(transaction)
         self.next_id += 1
-        self.update_category(category, -amount)
+        self.categories[category] -= amount
+        self.update_budget(category, -amount)
         self.check_budget(category)
 
+    def update_budget(self, category, amount):
+        if category in self.budgets:
+            self.budgets[category] += amount
+        else:
+            self.budgets[category] = amount
+
+    def check_budget(self, category):
+        if category in self.budgets and self.budgets[category] < -500:
+            print(f"\033[93mWarning:\033[0m You have exceeded the budget for {category}!")
+
     def calculate_balance(self):
-        income = sum(transaction['amount'] for transaction in self.transactions if transaction['type'] == 'Income')
-        expenses = sum(transaction['amount'] for transaction in self.transactions if transaction['type'] == 'Expense')
+        income = sum(t['amount'] for t in self.transactions if t['type'] == 'Income' and t['profile'] == self.current_profile)
+        expenses = sum(t['amount'] for t in self.transactions if t['type'] == 'Expense' and t['profile'] == self.current_profile)
         return income, expenses, income - expenses
 
     def display_transactions(self):
         self.clear_screen()
         print(f"{'ID':<5} {'Type':<10} {'Description':<20} {'Amount':<10} {'Category':<15} {'Timestamp':<20}")
         print("="*85)
-        for transaction in self.transactions:
-            color = '\033[92m' if transaction['type'] == 'Income' else '\033[91m'
-            reset = '\033[0m'
-            print(f"{transaction['id']:<5} {color}{transaction['type']:<10}{reset} {transaction['description']:<20} {transaction['amount']:<10} {transaction['category']:<15} {transaction['timestamp']:<20}")
+        for t in self.transactions:
+            if t['profile'] == self.current_profile:
+                color = '\033[92m' if t['type'] == 'Income' else '\033[91m'
+                reset = '\033[0m'
+                print(f"{t['id']:<5} {color}{t['type']:<10}{reset} {t['description']:<20} {t['amount']:<10} {t['category']:<15} {t['timestamp']:<20}")
         self.display_summary()
 
     def display_summary(self):
@@ -55,12 +79,6 @@ class BudgetTracker:
         print(f"\033[91mTotal Expenses:\033[0m ${expenses:.2f}")
         print(f"\033[94mNet Balance:\033[0m ${balance:.2f}")
         print("="*85)
-
-    def update_category(self, category, amount):
-        if category in self.categories:
-            self.categories[category] += amount
-        else:
-            self.categories[category] = amount
 
     def display_category_summary(self):
         print("\nCategory Summary:")
@@ -72,88 +90,70 @@ class BudgetTracker:
             print(f"{color}{category:<15} ${balance:.2f}{reset}")
         print("="*25)
 
-    def check_budget(self, category):
-        if self.categories[category] < -500:
-            print(f"\033[93mWarning:\033[0m You have exceeded the budget for {category}!")
+    def display_profile_summary(self):
+        print("\nUser Profiles Summary:")
+        for profile, data in self.profiles.items():
+            print(f"{profile}: Total Balance: ${data['balance']:.2f}")
+        print("="*25)
 
-    def filter_transactions(self, transaction_type):
-        return [t for t in self.transactions if t['type'] == transaction_type]
-
-    def display_filtered_transactions(self, transaction_type):
-        transactions = self.filter_transactions(transaction_type)
-        if transactions:
-            print(f"\n{transaction_type} Transactions:")
-            print(f"{'ID':<5} {'Description':<20} {'Amount':<10} {'Category':<15} {'Timestamp':<20}")
-            print("="*70)
-            for transaction in transactions:
-                print(f"{transaction['id']:<5} {transaction['description']:<20} {transaction['amount']:<10} {transaction['category']:<15} {transaction['timestamp']:<20}")
+    def add_profile(self, profile_name):
+        if profile_name not in self.profiles:
+            self.profiles[profile_name] = {'balance': 0}
+            print(f"Profile '{profile_name}' added.")
         else:
-            print(f"No {transaction_type.lower()} transactions found.")
+            print(f"Profile '{profile_name}' already exists.")
 
-    def input_amount(self, prompt):
-        while True:
-            try:
-                return float(input(prompt))
-            except ValueError:
-                print("Invalid input. Please enter a numeric value.")
-
-    def confirm_action(self, action):
-        confirmation = input(f"Are you sure you want to {action}? (yes/no): ").lower()
-        return confirmation == 'yes'
-
-    def edit_transaction(self, transaction_id):
-        for transaction in self.transactions:
-            if transaction['id'] == transaction_id:
-                if not self.confirm_action('edit this transaction'):
-                    print("Edit cancelled.")
-                    return
-                print("Editing Transaction:")
-                transaction['description'] = input("Enter new description: ")
-                transaction['amount'] = self.input_amount("Enter new amount: ")
-                transaction['timestamp'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                transaction['category'] = input("Enter new category: ")
-                print("Transaction updated.")
-                return
-        print("Transaction ID not found.")
-
-    def delete_transaction(self, transaction_id):
-        for transaction in self.transactions:
-            if transaction['id'] == transaction_id:
-                if not self.confirm_action('delete this transaction'):
-                    print("Delete cancelled.")
-                    return
-                self.update_category(transaction['category'], -transaction['amount'])
-                self.transactions.remove(transaction)
-                print("Transaction deleted.")
-                return
-        print("Transaction ID not found.")
-
-    def search_transactions(self, search_term):
-        results = [t for t in self.transactions if search_term.lower() in t['description'].lower() or search_term == str(t['amount'])]
-        if results:
-            print(f"\nSearch Results for '{search_term}':")
-            print(f"{'ID':<5} {'Type':<10} {'Description':<20} {'Amount':<10} {'Category':<15} {'Timestamp':<20}")
-            print("="*85)
-            for transaction in results:
-                color = '\033[92m' if transaction['type'] == 'Income' else '\033[91m'
-                reset = '\033[0m'
-                print(f"{transaction['id']:<5} {color}{transaction['type']:<10}{reset} {transaction['description']:<20} {transaction['amount']:<10} {transaction['category']:<15} {transaction['timestamp']:<20}")
+    def switch_profile(self, profile_name):
+        if profile_name in self.profiles:
+            self.current_profile = profile_name
+            print(f"Switched to profile '{profile_name}'.")
         else:
-            print(f"No transactions found containing '{search_term}'.")
+            print(f"Profile '{profile_name}' does not exist.")
 
-    def export_transactions(self, filename='transactions.csv'):
-        with open(filename, 'w', newline='') as csvfile:
-            fieldnames = ['ID', 'Type', 'Description', 'Amount', 'Category', 'Timestamp']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    def add_recurring_transaction(self, transaction_type, description, amount, category='General', interval='monthly'):
+        self.recurring_transactions[self.current_profile].append({
+            'type': transaction_type,
+            'description': description,
+            'amount': amount,
+            'category': category,
+            'interval': interval
+        })
 
-            writer.writeheader()
-            for transaction in self.transactions:
-                writer.writerow(transaction)
-        print(f"Transactions exported to {filename}")
+    def process_recurring_transactions(self):
+        for transaction in self.recurring_transactions[self.current_profile]:
+            if transaction['interval'] == 'monthly':
+                self.add_income(transaction['description'], transaction['amount'], transaction['category']) if transaction['type'] == 'Income' else self.add_expense(transaction['description'], transaction['amount'], transaction['category'])
+
+    def generate_graphical_report(self):
+        income = defaultdict(float)
+        expenses = defaultdict(float)
+
+        for t in self.transactions:
+            if t['profile'] == self.current_profile:
+                month = t['timestamp'][:7]
+                if t['type'] == 'Income':
+                    income[month] += t['amount']
+                else:
+                    expenses[month] += t['amount']
+
+        months = sorted(set(income.keys()).union(expenses.keys()))
+        income_values = [income.get(month, 0) for month in months]
+        expense_values = [expenses.get(month, 0) for month in months]
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(months, income_values, label='Income', color='green')
+        plt.plot(months, expense_values, label='Expenses', color='red')
+        plt.xlabel('Month')
+        plt.ylabel('Amount')
+        plt.title('Monthly Income and Expenses')
+        plt.legend()
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
 
     def save_data(self, filename='budget_data.csv'):
         with open(filename, 'w', newline='') as csvfile:
-            fieldnames = ['ID', 'Type', 'Description', 'Amount', 'Category', 'Timestamp']
+            fieldnames = ['ID', 'Type', 'Description', 'Amount', 'Category', 'Timestamp', 'Profile']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
             writer.writeheader()
@@ -166,11 +166,11 @@ class BudgetTracker:
             with open(filename, 'r') as csvfile:
                 reader = csv.DictReader(csvfile)
                 self.transactions = []
-                self.categories = {}
+                self.categories = defaultdict(float)
                 for row in reader:
                     row['amount'] = float(row['amount'])
                     self.transactions.append(row)
-                    self.update_category(row['category'], row['amount'])
+                    self.categories[row['category']] += row['amount']
                     self.next_id = max(self.next_id, int(row['id']) + 1)
             print(f"Data loaded from {filename}")
         except FileNotFoundError:
@@ -197,7 +197,11 @@ if __name__ == "__main__":
         print("9. Search Transactions")
         print("10. Export Transactions to CSV")
         print("11. View Category Summary")
-        print("12. Save & Exit")
+        print("12. Add Profile")
+        print("13. Switch Profile")
+        print("14. Add Recurring Transaction")
+        print("15. Generate Graphical Report")
+        print("16. Save & Exit")
         print("0. Exit without Saving")
 
         choice = input("Select an option: ")
@@ -236,6 +240,21 @@ if __name__ == "__main__":
         elif choice == '11':
             tracker.display_category_summary()
         elif choice == '12':
+            profile_name = input("Enter new profile name: ")
+            tracker.add_profile(profile_name)
+        elif choice == '13':
+            profile_name = input("Enter profile name to switch to: ")
+            tracker.switch_profile(profile_name)
+        elif choice == '14':
+            transaction_type = input("Enter transaction type (Income/Expense): ")
+            desc = input("Enter description: ")
+            amt = tracker.input_amount("Enter amount: ")
+            category = input("Enter category: ")
+            interval = input("Enter interval (monthly/weekly): ")
+            tracker.add_recurring_transaction(transaction_type, desc, amt, category, interval)
+        elif choice == '15':
+            tracker.generate_graphical_report()
+        elif choice == '16':
             tracker.save_data()
             break
         elif choice == '0':
