@@ -1,6 +1,7 @@
 # Budget-Tracker
 
 A Python-based Budget Tracker application that helps users manage their income, expenses, and track their financial transactions. It supports multiple user profiles, data encryption for security, and provides graphical reports for a better understanding of your financial situation.
+![image](https://github.com/user-attachments/assets/b5660be9-5deb-4880-a407-8671bc0bed47)
 
 ## Features
 
